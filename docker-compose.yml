@@ -79,7 +79,7 @@ services:
       - "9696:9696"
 
   flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:v3.5.2
+    image: flaresolverr/flaresolverr:v3.5.2
     container_name: flaresolverr
     restart: unless-stopped
     environment:
@@ -112,7 +112,7 @@ services:
   # --- Lecture et demandes -------------------------------------------------
   jellyfin:
     <<: *common
-    image: lscr.io/linuxserver/jellyfin:12.4ubu2604
+    image: lscr.io/linuxserver/jellyfin:version-12.4ubu2604
     container_name: jellyfin
     volumes:
       - ${CONFIG_DIR}/jellyfin:/config

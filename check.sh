@@ -40,7 +40,9 @@ glue_ip=$(docker logs gluetun 2>&1 | grep -o 'Public IP address is [0-9.]*' | ta
 # DNS : qBittorrent doit n'utiliser que le résolveur de gluetun (DNS over TLS dans le tunnel).
 check "DNS de qBittorrent = résolveur de gluetun (127.0.0.1), pas celui de l'hôte" \
   inq sh -c 'grep -q "^nameserver 127.0.0.1" /etc/resolv.conf && [ "$(grep -c ^nameserver /etc/resolv.conf)" = 1 ]'
-check "DNS résout depuis qBittorrent" inq nslookup example.com
+# Nom jamais vu : évite le cache DNS de gluetun (sinon un tunnel coupé répondrait encore).
+fresh() { echo "k$RANDOM$RANDOM.1-1-1-1.sslip.io"; }
+check "DNS résout depuis qBittorrent" inq nslookup "$(fresh)"
 # Témoin négatif : un résolveur local (passerelle docker) injoignable = pas de fuite hors tunnel.
 gw=$(docker exec gluetun ip route | awk '/default/ {print $3; exit}')
 check "DNS vers le réseau local (${gw:-?}) bloqué depuis qBittorrent" \
@@ -88,7 +90,7 @@ if [ "${1:-}" = "--killswitch" ]; then
   docker exec gluetun ip link set tun0 down
   check "IPv4 bloqué tunnel coupé" inq sh -c '! curl -4 -s --max-time 5 https://ifconfig.me'
   check "IPv6 bloqué tunnel coupé" inq sh -c '! curl -6 -s --max-time 5 https://ifconfig.me'
-  check "DNS bloqué tunnel coupé"  inq sh -c '! nslookup -timeout=3 example.com'
+  check "DNS bloqué tunnel coupé"  inq sh -c "! nslookup -timeout=3 $(fresh)"
   check "IP de l'hôte jamais exposée (connexion directe par IP bloquée)" inq sh -c '! curl -s --max-time 5 http://1.1.1.1/'
   echo "  ... rétablissement du tunnel"
   # tun0 coupé ne revient pas seul : on relance gluetun puis qBittorrent (qui doit rejoindre son nouveau réseau).
