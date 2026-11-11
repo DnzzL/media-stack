@@ -1,0 +1,134 @@
+# Stack media : gluetun (VPN Proton) + qBittorrent + *arr + Jellyfin.
+# Réglages dans .env (copié depuis .env.example). Lancer : docker compose up -d
+
+x-common: &common
+  restart: unless-stopped
+  environment: &common-env
+    PUID: ${PUID}
+    PGID: ${PGID}
+    TZ: ${TZ}
+
+services:
+  # --- VPN : tout le trafic de qBittorrent passe par ici -------------------
+  gluetun:
+    image: qmcgaw/gluetun:v3.41
+    container_name: gluetun
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TZ: ${TZ}
+      VPN_SERVICE_PROVIDER: protonvpn
+      VPN_TYPE: wireguard
+      WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY:?Renseignez WIREGUARD_PRIVATE_KEY dans .env}
+      SERVER_COUNTRIES: ${SERVER_COUNTRIES:-Switzerland}
+      # Proton : seuls les serveurs P2P gardent le port forwarding.
+      PORT_FORWARD_ONLY: "on"
+      VPN_PORT_FORWARDING: "on"
+      # Le port forwardé (change à chaque connexion) est poussé à qBittorrent
+      # par gluetun lui-même, à chaque (re)connexion et renouvellement.
+      # Nécessite « Bypass authentication for clients on localhost » dans
+      # qBittorrent (activé par init/qbittorrent-init.sh).
+      VPN_PORT_FORWARDING_UP_COMMAND: >-
+        /bin/sh -c 'wget -qO- --retry-connrefused --tries=10 --waitretry=3
+        --post-data "json={\"listen_port\":{{PORTS}},\"random_port\":false,\"upnp\":false}"
+        http://127.0.0.1:8081/api/v2/app/setPreferences'
+      # WireGuard noyau si présent, sinon userspace (wireguard-go) : automatique.
+      # Utile sur Synology dont le noyau n'a souvent pas le module.
+      WIREGUARD_IMPLEMENTATION: auto
+      # Les services du réseau docker (Sonarr, Radarr, Prowlarr) joignent qBittorrent.
+      FIREWALL_INPUT_PORTS: "8081"
+    ports:
+      - "${QBIT_PORT:-8081}:8081"   # Web UI qBittorrent (publiée via gluetun)
+    healthcheck:
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # --- Téléchargement : réseau de gluetun UNIQUEMENT (kill-switch) ---------
+  qbittorrent:
+    <<: *common
+    image: lscr.io/linuxserver/qbittorrent:5.3.0
+    container_name: qbittorrent
+    network_mode: "service:gluetun"
+    environment:
+      <<: *common-env
+      WEBUI_PORT: "8081"
+      UMASK: "002"
+    volumes:
+      - ${CONFIG_DIR}/qbittorrent:/config
+      - ${DATA_DIR}:/data
+      - ./init/qbittorrent-init.sh:/custom-cont-init.d/qbittorrent-init.sh:ro
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true   # gluetun redémarre → qBittorrent rejoint son nouveau réseau
+
+  # --- Indexeurs -----------------------------------------------------------
+  prowlarr:
+    <<: *common
+    image: lscr.io/linuxserver/prowlarr:2.7.0
+    container_name: prowlarr
+    volumes:
+      - ${CONFIG_DIR}/prowlarr:/config
+    ports:
+      - "9696:9696"
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.5.2
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      LOG_LEVEL: info
+    # Pas de port publié : Prowlarr le joint sur http://flaresolverr:8191
+
+  # --- Gestion des séries / films -----------------------------------------
+  # qBittorrent se joint via l'hôte « gluetun », port 8081.
+  sonarr:
+    <<: *common
+    image: lscr.io/linuxserver/sonarr:4.0.20
+    container_name: sonarr
+    volumes:
+      - ${CONFIG_DIR}/sonarr:/config
+      - ${DATA_DIR}:/data
+    ports:
+      - "8989:8989"
+
+  radarr:
+    <<: *common
+    image: lscr.io/linuxserver/radarr:6.4.4
+    container_name: radarr
+    volumes:
+      - ${CONFIG_DIR}/radarr:/config
+      - ${DATA_DIR}:/data
+    ports:
+      - "7878:7878"
+
+  # --- Lecture et demandes -------------------------------------------------
+  jellyfin:
+    <<: *common
+    image: lscr.io/linuxserver/jellyfin:12.4ubu2604
+    container_name: jellyfin
+    volumes:
+      - ${CONFIG_DIR}/jellyfin:/config
+      - ${DATA_DIR}/library:/data/library
+    ports:
+      - "8096:8096"
+    # Transcodage matériel : volontairement absent (voir README).
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:2.7.3
+    container_name: jellyseerr
+    restart: unless-stopped
+    user: "${PUID}:${PGID}"
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ${CONFIG_DIR}/jellyseerr:/app/config
+    ports:
+      - "5055:5055"
