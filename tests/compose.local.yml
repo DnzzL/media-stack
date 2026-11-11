@@ -1,0 +1,15 @@
+# Banc d'essai SANS VPN : remplace gluetun par un conteneur inerte qui garde
+# le même nom réseau (« gluetun ») et le port 8081. Pour tester setup.sh et les
+# tests/*.py sur un poste de dev. Jamais en production.
+# Usage : docker compose -f docker-compose.yml -f tests/compose.local.yml up -d
+services:
+  gluetun:
+    image: alpine:3.22
+    entrypoint: ["sleep", "infinity"]
+    cap_add: !reset []
+    devices: !reset []
+    environment: !reset {}
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 5s
+      retries: 3
