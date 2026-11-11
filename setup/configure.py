@@ -23,7 +23,7 @@ QBIT = "http://gluetun:8081"
 QBIT_USER = "admin"
 CONFIG = "/config"
 
-# Regex des formats personnalisés (voir README, « Réglages manuels »).
+# Regex des formats personnalisés (pièges documentés dans le README du setup NixOS de référence).
 RE_CAM = r"\b(HQ[ ._-]?Pre|PreDVD|HD-?CAM|CAM(Rip)?|HD-?TS|TS|TELESYNC|TC|TELECINE|HC)\b"
 RE_VF = r"\b(MULTi|VFF|VF2|VFi|VFQ|TRUEFRENCH|FRENCH)\b"
 RE_SUBS = r"VOSTFR|SUBFRENCH"
@@ -138,7 +138,7 @@ def qbittorrent(password, temp):
     logged = None
     for _ in range(60):  # qBittorrent peut démarrer après gluetun
         try:
-            for candidate in (password, temp):
+            for candidate in (temp, password):  # temp d'abord : évite un échec de login (5 = ban 1 h)
                 if candidate and post("/api/v2/auth/login", {"username": QBIT_USER, "password": candidate}) in ("Ok.", ""):  # qBittorrent 5 : 204 sans corps
                     logged = candidate
                     break
@@ -163,9 +163,20 @@ def qbittorrent(password, temp):
 
 
 # --------------------------------------------------------------------- Prowlarr
+def wait_flaresolverr():
+    for _ in range(60):
+        try:
+            urllib.request.urlopen("http://flaresolverr:8191/", timeout=5).read()
+            return
+        except (urllib.error.URLError, OSError):
+            time.sleep(2)
+    raise Fatal("FlareSolverr ne répond pas sur http://flaresolverr:8191/")
+
+
 def prowlarr(sonarr_key, radarr_key):
     print("== Prowlarr")
     api = connect("prowlarr", 9696, "v1")
+    wait_flaresolverr()
 
     tag = next((t for t in api.get("/tag") if t["label"] == "flaresolverr"), None) \
         or api.post("/tag", {"label": "flaresolverr"})
@@ -179,6 +190,7 @@ def prowlarr(sonarr_key, radarr_key):
 
     profiles = api.get("/appprofile")
     profile = (by_name(profiles, "Standard") or profiles[0])["id"]
+    missing = []
     have = {i["name"] for i in api.get("/indexer")}
     schemas = {s["name"]: s for s in api.get("/indexer/schema")}
     for name in PUBLIC_INDEXERS:
@@ -187,6 +199,7 @@ def prowlarr(sonarr_key, radarr_key):
             continue
         if name not in schemas:
             say(f"indexeur {name} : absent de cette version de Prowlarr, ignoré")
+            missing.append(name)
             continue
         item = dict(schemas[name], enable=True, appProfileId=profile,
                     tags=[tag["id"]] if name in CLOUDFLARE_INDEXERS else [])
@@ -195,6 +208,7 @@ def prowlarr(sonarr_key, radarr_key):
             say(f"indexeur {name} : ajouté")
         except Fatal as e:  # un indexeur public peut être en panne : pas bloquant
             say(f"indexeur {name} : test refusé, non ajouté (relancez plus tard) : {str(e)[:120]}")
+            missing.append(name)
 
     for app, port, key in (("Sonarr", 8989, sonarr_key), ("Radarr", 7878, radarr_key)):
         def application(existing, app=app, port=port, key=key):
@@ -203,6 +217,7 @@ def prowlarr(sonarr_key, radarr_key):
             set_fields(item, {"prowlarrUrl": "http://prowlarr:9696", "baseUrl": f"http://{app.lower()}:{port}", "apiKey": key})
             return item
         upsert(api, "/applications", app, application, f"application {app}")
+    return missing
 
 
 # ------------------------------------------------------------------ Sonarr/Radarr
@@ -280,13 +295,20 @@ def quality_sizes(api, names, lo, hi):
             d.update(minSize=lo, maxSize=hi, preferredSize=min(d.get("preferredSize") or hi, hi))
             changed.append(d)
     api.put("/qualitydefinition/update", changed)
+    # Radarr met parfois quelques secondes à servir les nouvelles valeurs : on attend de les relire.
+    for _ in range(30):
+        now = {d["title"]: (d.get("minSize"), d.get("maxSize")) for d in api.get("/qualitydefinition")}
+        if all(now[d["title"]] == (lo, hi) for d in changed):
+            break
+        time.sleep(2)
+    else:
+        raise Fatal(f"{api.name} : tailles de qualité non relues après modification")
     say(f"tailles 1080p : {lo} à {hi} Mo/min")
 
 
-def arr(app, port, kind, qbit_password, jellyfin_key):
+def arr(app, api, kind, qbit_password, jellyfin_key):
     print(f"== {app}")
     is_radarr = kind == "radarr"
-    api = connect(kind, port)
 
     root = "/data/library/movies" if is_radarr else "/data/library/tv"
     if root not in [r["path"] for r in api.get("/rootfolder")]:
@@ -342,9 +364,14 @@ def main():
         raise Fatal("QBIT_PASSWORD manquant")
     jellyfin_key = os.environ.get("JELLYFIN_API_KEY", "")
     qbittorrent(password, os.environ.get("QBIT_TEMP_PASSWORD", ""))
-    prowlarr(api_key("sonarr"), api_key("radarr"))
-    arr("Sonarr", 8989, "sonarr", password, jellyfin_key)
-    arr("Radarr", 7878, "radarr", password, jellyfin_key)
+    # Sonarr/Radarr d'abord prêts : Prowlarr teste leur API en les ajoutant.
+    sonarr, radarr = connect("sonarr", 8989), connect("radarr", 7878)
+    missing = prowlarr(sonarr.key, radarr.key)
+    arr("Sonarr", sonarr, "sonarr", password, jellyfin_key)
+    arr("Radarr", radarr, "radarr", password, jellyfin_key)
+    if missing:
+        print(f"\nATTENTION : indexeurs non ajoutés : {', '.join(missing)}. Relancez ./setup.sh plus tard "
+              "(ou ajoutez-les dans Prowlarr > Indexers).")
 
 
 if __name__ == "__main__":

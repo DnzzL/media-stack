@@ -44,9 +44,11 @@ fi
 # Mot de passe temporaire de qBittorrent (première fois seulement), pris dans ses logs.
 temp=$(docker logs qbittorrent 2>&1 | grep -o 'temporary password is provided for this session: .*' | tail -1 | awk '{print $NF}' | tr -d '\r' || true)
 
-network=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' gluetun)
+network=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' gluetun | awk '{print $1}')
+# Secrets passés par nom (pas dans la ligne de commande, visible avec ps).
+export QBIT_PASSWORD QBIT_TEMP_PASSWORD="${temp:-}" JELLYFIN_API_KEY="${JELLYFIN_API_KEY:-}"
 docker run --rm --network "$network" \
-  -e QBIT_PASSWORD="$QBIT_PASSWORD" -e QBIT_TEMP_PASSWORD="${temp:-}" -e JELLYFIN_API_KEY="${JELLYFIN_API_KEY:-}" \
+  -e QBIT_PASSWORD -e QBIT_TEMP_PASSWORD -e JELLYFIN_API_KEY \
   -v "$PWD/setup:/setup:ro" -v "$CONFIG_DIR:/config:ro" \
   "$PY_IMAGE" python3 -I /setup/configure.py
 
