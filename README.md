@@ -6,7 +6,7 @@ Avec ce projet, ton NAS devient un petit « Netflix » à toi :
 2. Le NAS le trouve et le télécharge tout seul (**Radarr** pour les films, **Sonarr** pour les séries, **Prowlarr** pour chercher, **qBittorrent** pour télécharger).
 3. Tu le regardes (**Jellyfin**), sur la télé, le téléphone ou l'ordinateur.
 
-Les téléchargements passent **toujours** par un VPN (**Proton VPN**). Si le VPN tombe, tout s'arrête : rien ne sort avec ton adresse IP de maison. C'est le « kill-switch ».
+Les **téléchargements** (qBittorrent) passent **toujours** par un VPN (**Proton VPN**). Si le VPN tombe, ils s'arrêtent : rien ne sort avec ton adresse IP de maison. C'est le « kill-switch ». Seuls les téléchargements sont protégés : les recherches de Prowlarr, Radarr et Sonarr sortent avec l'IP de ta maison.
 
 Tout fonctionne **dans ton réseau local** (ta box, ton wifi). Rien n'est accessible depuis Internet.
 
@@ -32,11 +32,11 @@ Tu n'as jamais utilisé Docker ? Pas de souci. Docker est un outil qui fait tour
 
 | Il te faut | Détail |
 |---|---|
-| Un NAS **x86** avec **Docker** | Processeur Intel ou AMD. Les NAS d'entrée de gamme à processeur **ARM** ne conviennent **pas** : trop lents pour faire tourner toutes les applications. |
-| **4 Go de RAM** ou plus | Moins, et le NAS rame ou plante. |
+| Un NAS **x86** avec **Docker** | Processeur Intel ou AMD. Les NAS d'entrée de gamme à processeur **ARM** ne conviennent **pas**. |
+| **4 Go de RAM** ou plus | Huit applications tournent en même temps : en dessous, le NAS risque de ramer. |
 | Docker **Compose v2** | La commande `docker compose version` doit répondre. Sur Synology : **Container Manager** (DSM 7.2 ou plus récent). |
 | Un abonnement **Proton VPN payant** | Le port forwarding (nécessaire pour télécharger vite) n'existe que sur les offres payantes. |
-| De l'espace disque | Un film en 1080p pèse environ 6 Go, un épisode environ 2 Go. |
+| De l'espace disque | Un film en 1080p pèse jusqu'à environ 6 Go, un épisode jusqu'à environ 2 Go. |
 | Un accès **SSH** au NAS | Une « ligne de commande » à distance. Voir ci-dessous. |
 
 **Vérifier que ton NAS est x86.** Dans un terminal SSH (voir plus bas), tape :
@@ -62,13 +62,13 @@ Remplace `TON-UTILISATEUR` par ton compte administrateur du NAS et `IP-DU-NAS` p
 
 ### Récupérer le projet sur le NAS
 
-Copie le dossier `media-stack` sur le NAS (par exemple avec *File Station* sur Synology), puis, en SSH, place-toi dedans. Exemple Synology :
+Copie le dossier du projet sur le NAS (par exemple avec *File Station* sur Synology), **en entier** (avec `init/` et `setup/`), puis, en SSH, place-toi dedans. Exemple Synology :
 
 ```bash
-cd /volume1/docker/media-stack-projet
+cd /volume1/docker/projet-media
 ```
 
-(Adapte le chemin à l'endroit où tu as mis le dossier. Il doit contenir `docker-compose.yml`, `.env.example`, `setup.sh` et `check.sh`.)
+(Adapte le chemin à l'endroit où tu as mis le dossier. Il doit contenir `docker-compose.yml`, `.env.example`, `setup.sh`, `check.sh` et les dossiers `init/` et `setup/`. Ce dossier est **différent** de `CONFIG_DIR` (étape 4) : ne mélange pas les deux.)
 
 Si les scripts ont perdu leur droit d'exécution pendant la copie, rends-le leur :
 
@@ -151,7 +151,7 @@ Dans le dossier du projet, copie le modèle :
 cp .env.example .env
 ```
 
-Ouvre `.env` avec un éditeur : `nano .env` en SSH (sauvegarde avec `Ctrl+O` puis `Entrée`, quitte avec `Ctrl+X`), ou avec l'éditeur de texte de ton NAS.
+Ouvre `.env` avec un éditeur. `.env` est un fichier **caché** (son nom commence par un point) : il n'apparaît pas toujours dans l'explorateur du NAS. En SSH, `nano .env` marche s'il est installé (sauvegarde avec `Ctrl+O` puis `Entrée`, quitte avec `Ctrl+X`). Sinon, utilise `vi .env`, ou copie `.env` sur ton ordinateur, modifie-le avec un éditeur de texte, puis remets-le sur le NAS.
 
 | Variable | Ce que c'est | Que mettre |
 |---|---|---|
@@ -201,6 +201,17 @@ Si tu vois une ligne qui commence par `crw`, c'est bon, passe à la suite. Si tu
 >
 > 4. Valide, puis **sélectionne la tâche et clique sur *Exécuter*** (pas besoin de redémarrer le NAS). Relance `ls -l /dev/net/tun` : la ligne doit maintenant commencer par `crw`.
 
+### Préparer le dossier de Jellyseerr
+
+Jellyseerr tourne avec ton `PUID`/`PGID`. Si Docker crée lui-même son dossier de réglages, il le crée en `root` et Jellyseerr ne peut pas y écrire. Crée-le donc avant de démarrer (remplace `CONFIG_DIR`, `PUID` et `PGID` par tes valeurs de `.env`) :
+
+```bash
+sudo mkdir -p CONFIG_DIR/jellyseerr
+sudo chown PUID:PGID CONFIG_DIR/jellyseerr
+```
+
+Exemple : `sudo mkdir -p /volume1/docker/media-stack/jellyseerr` puis `sudo chown 1026:100 /volume1/docker/media-stack/jellyseerr`.
+
 ### Démarrer
 
 Choisis **une** méthode.
@@ -226,7 +237,7 @@ Choisis **une** méthode.
 
 > **QNAP : Container Station**
 >
-> Le plus simple et le plus sûr : utilise la **ligne de commande SSH** ci-dessus (Container Station installe Docker). Si `docker compose` n'est pas reconnu, essaie `docker-compose up -d`. Si aucun des deux ne marche, vérifie que Container Station est à jour.
+> Le plus simple et le plus sûr : utilise la **ligne de commande SSH** ci-dessus (Container Station installe Docker). Si `docker compose` n'est pas reconnu, mets Container Station à jour : le projet exige Compose v2.
 >
 > Les dossiers du projet doivent être sur un volume du NAS (pas dans `/tmp`).
 
@@ -286,7 +297,7 @@ Ouvre **http://IP-DU-NAS:8096** dans ton navigateur. Un assistant s'ouvre :
 Avec elle, Radarr et Sonarr préviennent Jellyfin dès qu'un film arrive. Sans elle, il apparaît au prochain scan automatique de Jellyfin (plus tard).
 
 1. Dans Jellyfin : icône de menu > *Tableau de bord* > *Clés API* > **+** > donne un nom (`media`) > valide, et copie la clé.
-2. Dans `.env`, retire le `#` devant `JELLYFIN_API_KEY=` et colle la clé après le `=`.
+2. Dans `.env`, retire le `# ` (dièse et espace) devant `JELLYFIN_API_KEY=` et colle la clé après le `=`.
 3. Relance `./setup.sh`.
 
 ### 5.3. Jellyseerr : la page des demandes
@@ -294,15 +305,17 @@ Avec elle, Radarr et Sonarr préviennent Jellyfin dès qu'un film arrive. Sans e
 Ouvre **http://IP-DU-NAS:5055**.
 
 1. Choisis **Jellyfin** comme serveur de médias.
-2. **URL Jellyfin** : `http://jellyfin:8096` (écris-la exactement comme ça : `jellyfin` est le nom de l'application *vue depuis Docker*, pas l'adresse du NAS).
+2. **Adresse de Jellyfin** : hôte `jellyfin`, port `8096`, SSL décoché (si on te demande une URL d'un seul bloc : `http://jellyfin:8096`). Écris-la exactement comme ça : `jellyfin` est le nom de l'application *vue depuis Docker*, pas l'adresse du NAS.
 3. Connecte-toi avec le **compte Jellyfin** créé juste avant.
 4. **Bibliothèques** : active *Films* et *Séries*, puis lance le scan (*Start Scan*).
 5. **Radarr** (films) : ajoute un serveur.
    - Nom d'hôte : `radarr`, port `7878`.
    - Clé API : dans Radarr (`http://IP-DU-NAS:7878`) > *Settings* > *General*. (Ou, en SSH : `grep ApiKey CONFIG_DIR/radarr/config.xml` en remplaçant `CONFIG_DIR` par ton chemin.)
+   - Clique sur **Test** : la liste des profils de qualité et des dossiers apparaît.
    - Profil de qualité : **HD-1080p**.
    - Dossier racine : `/data/library/movies`.
-6. **Sonarr** (séries) : pareil, nom d'hôte `sonarr`, port `8989`, clé API dans Sonarr (`http://IP-DU-NAS:8989`) > *Settings* > *General*, profil **HD-1080p**, dossier racine `/data/library/tv`.
+   - Coche **Serveur par défaut** (sinon les demandes de films ne partent pas).
+6. **Sonarr** (séries) : pareil, nom d'hôte `sonarr`, port `8989`, clé API dans Sonarr (`http://IP-DU-NAS:8989`) > *Settings* > *General*, clique sur **Test**, profil **HD-1080p**, dossier racine `/data/library/tv`, et coche **Serveur par défaut**.
 7. Termine l'assistant. Dans Jellyseerr, tu peux importer les autres utilisateurs Jellyfin (famille, amis) : ils pourront eux aussi faire des demandes.
 
 > Au premier accès à Radarr, Sonarr ou Prowlarr, la page peut te demander de **créer un identifiant et un mot de passe**. Fais-le et note-les. `./setup.sh` n'en a pas besoin pour fonctionner.
@@ -336,13 +349,13 @@ Il teste le VPN, le port forwarding, les dossiers et toutes les applications. Ch
 TOUT VERT
 ```
 
-La dernière ligne doit être **`TOUT VERT`**. L'important : l'adresse IP de qBittorrent doit être **différente** de celle de ton NAS (c'est celle de Proton), et le hardlink doit être `ok`.
+La dernière ligne doit être **`TOUT VERT`**. L'important : l'adresse IP de qBittorrent doit être **différente** de l'IP publique de ta maison (c'est celle de Proton), et le hardlink doit être `ok`.
 
 Si tu vois `ÉCHECS` à la fin, lis les lignes `FAIL` et va à [Dépannage](#8-dépannage).
 
 Le test peut attendre jusqu'à 90 secondes pour le port forwarding : c'est normal.
 
-**Test du kill-switch (facultatif)** : `./check.sh --killswitch` coupe le VPN pendant environ 15 secondes pour vérifier que rien ne sort, puis le rétablit. Ne le lance pas pendant un téléchargement important.
+**Test du kill-switch (facultatif)** : `./check.sh --killswitch` coupe le VPN pour vérifier que rien ne sort, puis le rétablit (en redémarrant gluetun et qBittorrent : compte une à plusieurs minutes). Ne le lance pas pendant un téléchargement important.
 
 ---
 
@@ -354,8 +367,8 @@ Le test peut attendre jusqu'à 90 secondes pour le port forwarding : c'est norma
 2. Cherche le titre.
 3. Clique sur **Demander** (*Request*). Pour une série, choisis les saisons.
 4. **Choisis la VF** : dans la fenêtre de demande, ouvre les **options avancées** et mets le **profil de qualité** sur **`HD-1080p VF`**.
-   - `HD-1080p VF` : ne télécharge **que** des versions avec audio français (VF, TRUEFRENCH, MULTi…). S'il n'en existe aucune, **rien ne se télécharge**, et c'est voulu.
-   - `HD-1080p` : n'importe quelle langue (souvent la version originale).
+   - `HD-1080p VF` : ne télécharge **que** des versions dont le nom de fichier contient `MULTi`, `VFF`, `VF2`, `VFi`, `VFQ`, `TRUEFRENCH` ou `FRENCH` (et pas `VOSTFR`, qui n'a que des sous-titres). S'il n'en existe aucune, **rien ne se télécharge**, et c'est voulu.
+   - `HD-1080p` : sans exigence de langue française. Pour un film, c'est le plus souvent la version originale.
    - Les options avancées ne s'affichent que si ton compte a la permission. Sinon, demande à l'administrateur.
 5. Attends. Selon le titre et ta connexion, de quelques minutes à quelques heures. Tu peux suivre l'avancement dans qBittorrent (`http://IP-DU-NAS:8081`, identifiant `admin`).
 
@@ -413,7 +426,7 @@ Pendant la coupure, **rien ne télécharge** et rien ne fuit : c'est le kill-swi
 
 1. Regarde l'espace libre : `df -h` (ou le gestionnaire de stockage de ton NAS).
 2. Supprime ce que tu as vu, dans Radarr/Sonarr (voir [l'étape 7](#supprimer-après-visionnage)).
-3. Rappelle-toi : l'espace est rendu **après la fin du seed** (7 jours au maximum).
+3. Rappelle-toi : l'espace est rendu **après la fin du seed** (7 jours au maximum). Si rien n'est libéré après ce délai, ouvre qBittorrent, supprime le torrent terminé en cochant **aussi les fichiers**.
 4. Synology : vérifie que la **corbeille est désactivée** sur le dossier partagé `media` (étape 3).
 
 ### Mettre à jour les applications
@@ -429,7 +442,7 @@ Tes réglages sont conservés dans `CONFIG_DIR`. Après une mise à jour, relanc
 
 ### Redémarrer le NAS
 
-Les applications redémarrent toutes seules. Sur Synology, la tâche `tun` de l'étape 4 recrée `/dev/net/tun`. Vérifie avec `./check.sh`.
+Les applications redémarrent toutes seules. Sur Synology, la tâche `tun` de l'étape 4 recrée `/dev/net/tun`. Vérifie avec `./check.sh`. Si `gluetun` est arrêté (le VPN a démarré avant la tâche `tun`), relance `docker compose up -d`.
 
 ### Sauvegarder
 
