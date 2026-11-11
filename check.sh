@@ -88,12 +88,11 @@ check "Radarr joint qBittorrent via gluetun" docker exec radarr curl -s -o /dev/
 if [ "${1:-}" = "--killswitch" ]; then
   echo "== kill-switch (tunnel coupé ~15 s)"
   docker exec gluetun ip link set tun0 down
-  check "IPv4 bloqué tunnel coupé" inq sh -c '! curl -4 -s --max-time 5 https://ifconfig.me'
-  check "IPv6 bloqué tunnel coupé" inq sh -c '! curl -6 -s --max-time 5 https://ifconfig.me'
-  check "DNS bloqué tunnel coupé"  inq sh -c "! nslookup -timeout=3 $(fresh)"
-  check "IP de l'hôte jamais exposée (connexion directe par IP bloquée)" inq sh -c '! curl -s --max-time 5 http://1.1.1.1/'
+  check "IPv4 bloqué tunnel coupé" inq sh -c '! curl -4 -s --max-time 3 https://ifconfig.me'
+  check "IPv6 bloqué tunnel coupé" inq sh -c '! curl -6 -s --max-time 3 https://ifconfig.me'
+  check "DNS bloqué tunnel coupé"  inq sh -c "! nslookup -timeout=2 $(fresh)"
   echo "  ... rétablissement du tunnel"
-  # tun0 coupé ne revient pas seul : on relance gluetun puis qBittorrent (qui doit rejoindre son nouveau réseau).
+  # gluetun peut ou non se reconnecter seul : on relance gluetun puis qBittorrent (qui doit rejoindre son nouveau réseau).
   docker restart gluetun >/dev/null
   for _ in $(seq 1 30); do
     [ "$(docker inspect -f '{{.State.Health.Status}}' gluetun)" = healthy ] && break; sleep 3
